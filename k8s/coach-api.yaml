@@ -1,0 +1,116 @@
+---
+# ─── Namespace ────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-coach
+---
+# ─── Secret: Claude API Key ───────────────────────────────────
+# kubectl create secret generic llm-coach-secret \
+#   --from-literal=ANTHROPIC_API_KEY=sk-ant-xxxx \
+#   -n llm-coach
+# (아래 Secret은 예시 - 직접 위 명령으로 생성하세요)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-coach-secret
+  namespace: llm-coach
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: "REPLACE_ME"
+---
+# ─── PersistentVolumeClaim: SQLite DB ─────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llm-coach-db-pvc
+  namespace: llm-coach
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+# ─── ServiceAccount + ClusterRoleBinding ──────────────────────
+# Coach API 가 kubectl apply/delete/get 를 쓰려면 권한 필요
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-coach-sa
+  namespace: llm-coach
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: llm-coach-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin          # 실습 환경이므로 admin 권한 사용
+subjects:
+- kind: ServiceAccount
+  name: llm-coach-sa
+  namespace: llm-coach
+---
+# ─── Deployment ───────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-coach-api
+  namespace: llm-coach
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-coach-api
+  template:
+    metadata:
+      labels:
+        app: llm-coach-api
+    spec:
+      serviceAccountName: llm-coach-sa
+      containers:
+      - name: api
+        image: llm-coach:latest    # 로컬 빌드 후 교체
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-coach-secret
+              key: ANTHROPIC_API_KEY
+        - name: DB_PATH
+          value: /data/llm-coach.db
+        - name: SCENARIOS_DIR
+          value: /app/scenarios
+        volumeMounts:
+        - name: db-volume
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: db-volume
+        persistentVolumeClaim:
+          claimName: llm-coach-db-pvc
+---
+# ─── Service (NodePort for easy access) ───────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-coach-api-svc
+  namespace: llm-coach
+spec:
+  type: NodePort
+  selector:
+    app: llm-coach-api
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30800

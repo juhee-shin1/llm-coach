@@ -1,0 +1,14 @@
+id: 03_pvc_pending
+title: "PVC Pending으로 인한 Pod 미기동"
+difficulty: medium
+learning_points:
+  - PVC Pending 원인 파악
+  - StorageClass 확인
+  - kubectl describe pvc 로 이벤트 확인
+related_tags: [PVC, PersistentVolume, StorageClass, Pending]
+root_cause: "존재하지 않는 StorageClass(fake-storage) 지정"
+solution_steps:
+  - "kubectl get pvc -n llm-coach"
+  - "kubectl describe pvc broken-pvc -n llm-coach"
+  - "kubectl get storageclass"
+  - "kubectl patch pvc broken-pvc -n llm-coach -p '{\"spec\":{\"storageClassName\":\"standard\"}}'"

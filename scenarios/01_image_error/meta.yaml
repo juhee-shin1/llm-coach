@@ -1,0 +1,14 @@
+id: 01_image_error
+title: "이미지 태그 오타로 인한 ImagePullBackOff"
+difficulty: easy
+learning_points:
+  - ImagePullBackOff 원인 파악
+  - kubectl describe pod 로 이벤트 확인
+  - kubectl set image 로 이미지 수정
+related_tags: [CrashLoopBackOff, ImagePullBackOff, Deployment]
+root_cause: "존재하지 않는 이미지 태그(nginx:99.99.99) 지정"
+solution_steps:
+  - "kubectl get pods -n llm-coach"
+  - "kubectl describe pod <pod> -n llm-coach"
+  - "kubectl set image deployment/broken-app app=nginx:stable -n llm-coach"
+  - "kubectl rollout status deployment/broken-app -n llm-coach"

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+COACH_API="${COACH_API:-http://localhost:8000}"
+KK_OUTPUT_LINES="${KK_OUTPUT_LINES:-50}"
+SESSION_FILE="${HOME}/.llm-coach/session.json"
+
+load_session_id() {
+  if [[ -n "${SESSION_ID}" ]]; then echo "${SESSION_ID}"; return; fi
+  if [[ -f "${SESSION_FILE}" ]]; then
+    python3 -c "import json; d=json.load(open('${SESSION_FILE}')); print(d.get('session_id',''))" 2>/dev/null
+  fi
+}
+
+cmd_coach() {
+  local sid; sid=$(load_session_id)
+  if [[ -z "${sid}" ]]; then echo "[kk coach] SESSION_ID 가 없습니다." >&2; return 1; fi
+  local cluster_summary; cluster_summary=$(kubectl get pods -A --no-headers 2>/dev/null | head -20 || echo "")
+  local payload; payload=$(python3 -c "
+import json,sys
+print(json.dumps({'session_id':'${sid}','cluster_summary':sys.stdin.read(),'doc_snippets':[]}))
+" <<< "${cluster_summary}")
+  echo "[kk coach] 힌트 요청 중..."
+  local resp; resp=$(curl -s -X POST "${COACH_API}/coach/hint" -H "Content-Type: application/json" -d "${payload}")
+  echo ""; echo "═══════════════════════════════════════"
+  echo "${resp}" | python3 -c "
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  print('📋 ' + d.get('summary',''))
+  cmds=d.get('next_commands',[])
+  if cmds:
+    print('\n💡 다음 명령:')
+    [print('   '+c) for c in cmds]
+  docs=d.get('doc_suggestions',[])
+  if docs:
+    print('\n📚 참고 문서:')
+    [print('   - '+doc) for doc in docs]
+except: print(sys.stdin.read())
+" 2>/dev/null || echo "${resp}"
+  echo "═══════════════════════════════════════"
+}
+
+send_log() {
+  local sid="$1" cmd="$2" out="$3" exit_code="$4"
+  [[ -z "${sid}" ]] && return
+  python3 - <<PYEOF 2>/dev/null &
+import json,urllib.request
+payload=json.dumps({"session_id":"${sid}","command":"${cmd}","output_head":"${out}","exit_code":${exit_code}}).encode()
+req=urllib.request.Request("${COACH_API}/command/log",data=payload,headers={"Content-Type":"application/json"},method="POST")
+try: urllib.request.urlopen(req,timeout=3)
+except: pass
+PYEOF
+}
+
+main() {
+  if [[ "$1" == "coach" ]]; then cmd_coach; return; fi
+  local tmp_out; tmp_out=$(mktemp)
+  kubectl "$@" 2>&1 | tee "${tmp_out}"
+  local exit_code=${PIPESTATUS[0]}
+  local out_head; out_head=$(head -n "${KK_OUTPUT_LINES}" "${tmp_out}")
+  rm -f "${tmp_out}"
+  local sid; sid=$(load_session_id)
+  send_log "${sid}" "kubectl $*" "${out_head}" "${exit_code}"
+  return "${exit_code}"
+}
+
+main "$@"

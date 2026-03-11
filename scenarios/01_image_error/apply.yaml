@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-coach
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-app
+  namespace: llm-coach
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: broken-app
+  template:
+    metadata:
+      labels:
+        app: broken-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:99.99.99
+        ports:
+        - containerPort: 80
+        resources:
+          requests: {memory: "32Mi", cpu: "50m"}
+          limits:  {memory: "64Mi", cpu: "100m"}

@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-coach
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: broken-pvc
+  namespace: llm-coach
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: fake-storage   # 존재하지 않는 StorageClass
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pvc-app
+  namespace: llm-coach
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pvc-app
+  template:
+    metadata:
+      labels:
+        app: pvc-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:stable
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        resources:
+          requests: {memory: "32Mi", cpu: "50m"}
+          limits:   {memory: "64Mi", cpu: "100m"}
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: broken-pvc

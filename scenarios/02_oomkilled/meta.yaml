@@ -1,0 +1,14 @@
+id: 02_oomkilled
+title: "메모리 부족으로 인한 OOMKilled"
+difficulty: medium
+learning_points:
+  - OOMKilled 원인 파악
+  - kubectl top 으로 리소스 사용량 확인
+  - resources limits/requests 수정
+related_tags: [OOMKilled, resources, limits, requests]
+root_cause: "메모리 limits가 너무 낮게 설정되어 있음 (4Mi)"
+solution_steps:
+  - "kubectl get pods -n llm-coach"
+  - "kubectl describe pod <pod> -n llm-coach"
+  - "kubectl set resources deployment/oom-app --limits=memory=128Mi --requests=memory=64Mi -n llm-coach"
+  - "kubectl rollout status deployment/oom-app -n llm-coach"
