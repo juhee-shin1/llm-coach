@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Coach — K8s Fault Diagnosis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0c0f;
+    --bg2:      #0f1215;
+    --bg3:      #151920;
+    --border:   #1e2530;
+    --border2:  #2a3340;
+    --text:     #c8d4e0;
+    --text2:    #6b7f94;
+    --text3:    #3d4f62;
+    --accent:   #00d4ff;
+    --accent2:  #0099bb;
+    --green:    #00e676;
+    --yellow:   #ffd740;
+    --red:      #ff5252;
+    --orange:   #ff9100;
+    --purple:   #b388ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 48px 1fr;
+    grid-template-columns: 280px 1fr 340px;
+    overflow: hidden;
+  }
+
+  /* ── HEADER ── */
+  header {
+    grid-column: 1 / -1;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+  }
+
+  .logo {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  .logo span { color: var(--text2); font-weight: 300; }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text2);
+  }
+
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  .dot.off { background: var(--text3); box-shadow: none; animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── LEFT PANEL — Sessions ── */
+  .panel-left {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-title {
+    padding: 12px 16px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text3);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .panel-title button {
+    background: none;
+    border: 1px solid var(--border2);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 3px 8px;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    transition: all 0.15s;
+  }
+
+  .panel-title button:hover {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .session-list::-webkit-scrollbar { width: 4px; }
+  .session-list::-webkit-scrollbar-track { background: transparent; }
+  .session-list::-webkit-scrollbar-thumb { background: var(--border2); }
+
+  .session-item {
+    padding: 10px 12px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    margin-bottom: 4px;
+    transition: all 0.15s;
+    position: relative;
+  }
+
+  .session-item:hover { border-color: var(--border2); background: var(--bg3); }
+  .session-item.active { border-color: var(--accent2); background: rgba(0, 212, 255, 0.05); }
+
+  .session-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+  }
+
+  .s-id {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+  }
+
+  .s-title {
+    font-size: 11px;
+    color: var(--text);
+    margin: 3px 0 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+
+  .s-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    color: var(--text3);
+  }
+
+  .badge {
+    padding: 1px 6px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .badge.in-progress { color: var(--yellow); border: 1px solid rgba(255,215,64,0.3); }
+  .badge.finished { color: var(--green); border: 1px solid rgba(0,230,118,0.3); }
+  .badge.easy { color: var(--green); }
+  .badge.medium { color: var(--yellow); }
+  .badge.hard { color: var(--red); }
+
+  /* ── SCENARIO START FORM ── */
+  .start-form {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .start-form select, .start-form button {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    outline: none;
+    cursor: pointer;
+  }
+
+  .start-form button {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: var(--accent2);
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+
+  .start-form button:hover { background: var(--accent); color: var(--bg); }
+
+  /* ── CENTER — Timeline ── */
+  .panel-center {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .timeline-header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .session-info h2 {
+    font-size: 13px;
+    font-weight: 500;
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: var(--text);
+  }
+
+  .session-info .sub {
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 2px;
+    letter-spacing: 0.05em;
+  }
+
+  .header-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 5px 12px;
+    background: none;
+    border: 1px solid var(--border2);
+    color: var(--text2);
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    transition: all 0.15s;
+  }
+
+  .btn:hover { border-color: var(--text2); color: var(--text); }
+  .btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .btn.primary { border-color: var(--accent2); color: var(--accent); }
+  .btn.primary:hover { background: var(--accent); color: var(--bg); }
+
+  /* Timeline scroll area */
+  .timeline-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .timeline-scroll::-webkit-scrollbar { width: 4px; }
+  .timeline-scroll::-webkit-scrollbar-thumb { background: var(--border2); }
+
+  /* Timeline items */
+  .timeline-track {
+    position: relative;
+    padding-left: 32px;
+  }
+
+  .timeline-track::before {
+    content: '';
+    position: absolute;
+    left: 10px; top: 0; bottom: 0;
+    width: 1px;
+    background: linear-gradient(to bottom, var(--accent2), var(--border));
+  }
+
+  .tl-item {
+    position: relative;
+    margin-bottom: 16px;
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .tl-dot {
+    position: absolute;
+    left: -26px;
+    top: 8px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    border: 1px solid var(--border2);
+    background: var(--bg);
+  }
+
+  .tl-dot.cmd { border-color: var(--accent2); background: var(--accent2); }
+  .tl-dot.snap { border-color: var(--purple); background: var(--purple); }
+  .tl-dot.hint { border-color: var(--yellow); background: var(--yellow); }
+  .tl-dot.error { border-color: var(--red); background: var(--red); }
+
+  .tl-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    transition: border-color 0.15s;
+  }
+
+  .tl-card:hover { border-color: var(--border2); }
+
+  .tl-time {
+    font-size: 9px;
+    color: var(--text3);
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+
+  .tl-cmd {
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 500;
+    word-break: break-all;
+  }
+
+  .tl-output {
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--text2);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 80px;
+    overflow: hidden;
+    position: relative;
+    line-height: 1.5;
+  }
+
+  .tl-output.expanded { max-height: none; }
+
+  .tl-output::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 20px;
+    background: linear-gradient(transparent, var(--bg2));
+  }
+
+  .tl-output.expanded::after { display: none; }
+
+  .tl-exit {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .exit-ok { color: var(--green); border: 1px solid rgba(0,230,118,0.3); }
+  .exit-err { color: var(--red); border: 1px solid rgba(255,82,82,0.3); }
+
+  .snap-summary {
+    font-size: 10px;
+    color: var(--purple);
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--text3);
+  }
+
+  .empty-state .icon { font-size: 32px; opacity: 0.3; }
+  .empty-state p { font-size: 12px; letter-spacing: 0.1em; }
+
+  /* ── RIGHT PANEL — Coach ── */
+  .panel-right {
+    background: var(--bg2);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .coach-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  .coach-body::-webkit-scrollbar { width: 4px; }
+  .coach-body::-webkit-scrollbar-thumb { background: var(--border2); }
+
+  .coach-section { margin-bottom: 20px; }
+
+  .coach-label {
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .hint-summary {
+    font-size: 11px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  .cmd-suggestion {
+    font-size: 11px;
+    color: var(--accent);
+    padding: 6px 10px;
+    background: rgba(0, 212, 255, 0.05);
+    border-left: 2px solid var(--accent2);
+    margin-bottom: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+    word-break: break-all;
+  }
+
+  .cmd-suggestion:hover { background: rgba(0, 212, 255, 0.12); }
+
+  .doc-item {
+    font-size: 11px;
+    color: var(--purple);
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .doc-item::before { content: '▸'; font-size: 9px; color: var(--text3); }
+
+  .coach-footer {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--yellow);
+    padding: 8px 0;
+  }
+
+  .spinner {
+    width: 12px; height: 12px;
+    border: 1px solid var(--border2);
+    border-top-color: var(--yellow);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Report panel */
+  .report-card {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+
+  .report-card h4 {
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 8px;
+  }
+
+  .report-card p, .report-card li {
+    font-size: 11px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  .report-card ul { padding-left: 14px; }
+
+  .report-card li { margin-bottom: 4px; }
+  .report-card li.good::marker { color: var(--green); }
+  .report-card li.bad::marker { color: var(--red); }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab {
+    flex: 1;
+    padding: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: none;
+    border: none;
+    color: var(--text3);
+    cursor: pointer;
+    transition: all 0.15s;
+    border-bottom: 2px solid transparent;
+  }
+
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text2); }
+
+  .tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  .tab-content.active { display: flex; }
+
+  /* Scan animation overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">LLM<span>─</span>COACH <span>// K8s Fault Diagnosis</span></div>
+  <div class="status-bar">
+    <div class="dot" id="apiDot"></div>
+    <span id="apiStatus">connecting...</span>
+    <span style="color:var(--border2)">|</span>
+    <span id="clock"></span>
+  </div>
+</header>
+
+<!-- LEFT: Sessions -->
+<div class="panel-left">
+  <div class="panel-title">
+    Sessions
+    <button onclick="loadSessions()">↻ refresh</button>
+  </div>
+  <div class="session-list" id="sessionList">
+    <div class="empty-state" style="height:200px">
+      <p>no sessions found</p>
+    </div>
+  </div>
+  <div class="start-form">
+    <div class="panel-title" style="border:none;padding:0 0 8px 0">New Scenario</div>
+    <select id="scenarioSelect">
+      <option value="">loading scenarios...</option>
+    </select>
+    <button onclick="startScenario()">▶ start scenario</button>
+  </div>
+</div>
+
+<!-- CENTER: Timeline -->
+<div class="panel-center">
+  <div class="timeline-header">
+    <div class="session-info">
+      <h2 id="timelineTitle">Select a session</h2>
+      <div class="sub" id="timelineSubtitle">← choose from the left panel</div>
+    </div>
+    <div class="header-actions">
+      <button class="btn" onclick="loadTimeline()">↻ refresh</button>
+      <button class="btn danger" id="finishBtn" onclick="finishSession()" style="display:none">■ finish</button>
+    </div>
+  </div>
+  <div class="timeline-scroll">
+    <div class="empty-state" id="timelineEmpty">
+      <div class="icon">⬡</div>
+      <p>no session selected</p>
+    </div>
+    <div class="timeline-track" id="timelineTrack" style="display:none"></div>
+  </div>
+</div>
+
+<!-- RIGHT: Coach -->
+<div class="panel-right">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('hint')">Hint</button>
+    <button class="tab" onclick="switchTab('report')">Report</button>
+  </div>
+
+  <!-- HINT TAB -->
+  <div class="tab-content active" id="tabHint">
+    <div class="coach-body" id="hintBody">
+      <div class="empty-state" style="height:200px">
+        <p>select a session to get hints</p>
+      </div>
+    </div>
+    <div class="coach-footer">
+      <button class="btn primary" onclick="getHint()">⚡ get hint</button>
+    </div>
+  </div>
+
+  <!-- REPORT TAB -->
+  <div class="tab-content" id="tabReport">
+    <div class="coach-body" id="reportBody">
+      <div class="empty-state" style="height:200px">
+        <p>finish a session to generate report</p>
+      </div>
+    </div>
+    <div class="coach-footer">
+      <button class="btn primary" onclick="getReport()">📋 generate report</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let currentSession = null;
+let scenarios = [];
+let autoRefresh = null;
+
+// ── Clock ──
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}, 1000);
+
+// ── API Health ──
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API}/health`);
+    const ok = r.ok;
+    document.getElementById('apiDot').className = 'dot' + (ok ? '' : ' off');
+    document.getElementById('apiStatus').textContent = ok ? 'api online' : 'api offline';
+    document.getElementById('apiStatus').style.color = ok ? 'var(--green)' : 'var(--red)';
+  } catch {
+    document.getElementById('apiDot').className = 'dot off';
+    document.getElementById('apiStatus').textContent = 'api offline';
+    document.getElementById('apiStatus').style.color = 'var(--red)';
+  }
+}
+setInterval(checkHealth, 5000);
+checkHealth();
+
+// ── Scenarios ──
+async function loadScenarios() {
+  try {
+    const r = await fetch(`${API}/scenario/`);
+    scenarios = await r.json();
+    const sel = document.getElementById('scenarioSelect');
+    sel.innerHTML = scenarios.map(s =>
+      `<option value="${s.id}">[${s.difficulty}] ${s.title}</option>`
+    ).join('');
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ── Sessions ──
+async function loadSessions() {
+  try {
+    // Get all sessions from DB via a known trick: query each known ID
+    // We'll fetch recent commands to discover session IDs
+    const r = await fetch(`${API}/command/`).catch(() => null);
+    // Instead, we build a session browser by querying all scenarios
+    // and checking for known sessions stored locally
+    const stored = JSON.parse(localStorage.getItem('llm-coach-sessions') || '[]');
+    renderSessionList(stored);
+  } catch(e) {}
+}
+
+function renderSessionList(sessions) {
+  const el = document.getElementById('sessionList');
+  if (!sessions.length) {
+    el.innerHTML = '<div class="empty-state" style="height:200px"><p>no sessions found</p></div>';
+    return;
+  }
+  el.innerHTML = sessions.map(s => `
+    <div class="session-item ${currentSession?.id === s.id ? 'active' : ''}"
+         onclick="selectSession(${JSON.stringify(s).replace(/"/g, '&quot;')})">
+      <div class="s-id">${s.id}</div>
+      <div class="s-title">${s.scenario_title || s.scenario_id}</div>
+      <div class="s-meta">
+        <span class="badge ${s.status === 'IN_PROGRESS' ? 'in-progress' : 'finished'}">
+          ${s.status === 'IN_PROGRESS' ? '● live' : '✓ done'}
+        </span>
+        <span>${formatTime(s.started_at)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  return iso.slice(11, 19) + ' UTC';
+}
+
+async function selectSession(s) {
+  currentSession = s;
+  document.getElementById('timelineTitle').textContent = s.scenario_title || s.scenario_id;
+  document.getElementById('timelineSubtitle').textContent =
+    `session: ${s.id}  ·  started: ${formatTime(s.started_at)}`;
+  document.getElementById('finishBtn').style.display =
+    s.status === 'IN_PROGRESS' ? 'block' : 'none';
+  loadSessions(); // re-render to update active
+  await loadTimeline();
+  if (s.status === 'IN_PROGRESS') {
+    clearInterval(autoRefresh);
+    autoRefresh = setInterval(loadTimeline, 10000);
+  } else {
+    clearInterval(autoRefresh);
+  }
+}
+
+async function loadTimeline() {
+  if (!currentSession) return;
+  try {
+    const [cmdsR, snapsR] = await Promise.all([
+      fetch(`${API}/command/${currentSession.id}?limit=100`),
+      fetch(`${API}/command/${currentSession.id}?limit=100`) // reuse for now
+    ]);
+    const cmds = await cmdsR.json();
+
+    const track = document.getElementById('timelineTrack');
+    const empty = document.getElementById('timelineEmpty');
+
+    if (!cmds.length) {
+      track.style.display = 'none';
+      empty.style.display = 'flex';
+      empty.innerHTML = '<div class="icon">⬡</div><p>no commands logged yet</p>';
+      return;
+    }
+
+    track.style.display = 'block';
+    empty.style.display = 'none';
+
+    // Sort ascending
+    const sorted = [...cmds].sort((a, b) => a.ts.localeCompare(b.ts));
+
+    track.innerHTML = sorted.map(cmd => `
+      <div class="tl-item">
+        <div class="tl-dot cmd"></div>
+        <div class="tl-card">
+          <div class="tl-time">${cmd.ts.slice(11,19)} UTC</div>
+          <div class="tl-cmd">$ ${cmd.command}</div>
+          ${cmd.output_head ? `
+            <div class="tl-output" onclick="toggleExpand(this)">
+              ${escHtml(cmd.output_head.slice(0, 300))}
+            </div>
+          ` : ''}
+          <span class="tl-exit ${cmd.exit_code === 0 ? 'exit-ok' : 'exit-err'}">
+            exit ${cmd.exit_code}
+          </span>
+        </div>
+      </div>
+    `).join('');
+
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function toggleExpand(el) {
+  el.classList.toggle('expanded');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Start Scenario ──
+async function startScenario() {
+  const scenario_id = document.getElementById('scenarioSelect').value;
+  if (!scenario_id) return;
+  try {
+    const r = await fetch(`${API}/session/start`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scenario_id})
+    });
+    const data = await r.json();
+    const session = {
+      id: data.session_id,
+      scenario_id,
+      scenario_title: data.scenario_title,
+      started_at: new Date().toISOString(),
+      status: 'IN_PROGRESS'
+    };
+    // Store locally
+    const stored = JSON.parse(localStorage.getItem('llm-coach-sessions') || '[]');
+    stored.unshift(session);
+    localStorage.setItem('llm-coach-sessions', JSON.stringify(stored));
+    loadSessions();
+    selectSession(session);
+    // Show session ID hint
+    showToast(`Session started: ${data.session_id}\nexport SESSION_ID=${data.session_id}`);
+  } catch(e) {
+    showToast('Failed to start scenario: ' + e.message);
+  }
+}
+
+// ── Finish Session ──
+async function finishSession() {
+  if (!currentSession) return;
+  if (!confirm(`Finish session ${currentSession.id}?`)) return;
+  try {
+    await fetch(`${API}/session/finish`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: currentSession.id})
+    });
+    const stored = JSON.parse(localStorage.getItem('llm-coach-sessions') || '[]');
+    const updated = stored.map(s =>
+      s.id === currentSession.id ? {...s, status: 'FINISHED'} : s
+    );
+    localStorage.setItem('llm-coach-sessions', JSON.stringify(updated));
+    currentSession = {...currentSession, status: 'FINISHED'};
+    document.getElementById('finishBtn').style.display = 'none';
+    clearInterval(autoRefresh);
+    loadSessions();
+    showToast('Session finished. Generate a report in the Report tab.');
+  } catch(e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+// ── Hint ──
+async function getHint() {
+  if (!currentSession) { showToast('Select a session first'); return; }
+  const body = document.getElementById('hintBody');
+  body.innerHTML = '<div class="loading"><div class="spinner"></div>querying llm...</div>';
+  try {
+    const r = await fetch(`${API}/coach/hint`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: currentSession.id,
+        cluster_summary: '',
+        doc_snippets: []
+      })
+    });
+    const d = await r.json();
+    if (d.raw) {
+      body.innerHTML = `<div class="hint-summary">${escHtml(d.raw)}</div>`;
+      return;
+    }
+    body.innerHTML = `
+      ${d.summary ? `
+        <div class="coach-section">
+          <div class="coach-label">Diagnosis Summary</div>
+          <div class="hint-summary">${escHtml(d.summary)}</div>
+        </div>
+      ` : ''}
+      ${d.next_commands?.length ? `
+        <div class="coach-section">
+          <div class="coach-label">Suggested Commands</div>
+          ${d.next_commands.map(c =>
+            `<div class="cmd-suggestion" title="click to copy" onclick="copyCmd('${escHtml(c)}')">
+              $ ${escHtml(c)}
+            </div>`
+          ).join('')}
+        </div>
+      ` : ''}
+      ${d.doc_suggestions?.length ? `
+        <div class="coach-section">
+          <div class="coach-label">Reference Docs</div>
+          ${d.doc_suggestions.map(doc =>
+            `<div class="doc-item">${escHtml(doc)}</div>`
+          ).join('')}
+        </div>
+      ` : ''}
+      <div style="font-size:9px;color:var(--text3);margin-top:12px">
+        ${new Date().toISOString().slice(11,19)} UTC
+      </div>
+    `;
+  } catch(e) {
+    body.innerHTML = `<div style="color:var(--red);font-size:11px">Error: ${e.message}</div>`;
+  }
+}
+
+function copyCmd(cmd) {
+  navigator.clipboard.writeText(cmd);
+  showToast('Copied: ' + cmd);
+}
+
+// ── Report ──
+async function getReport() {
+  if (!currentSession) { showToast('Select a session first'); return; }
+  const body = document.getElementById('reportBody');
+  body.innerHTML = '<div class="loading"><div class="spinner"></div>generating report...</div>';
+  try {
+    const r = await fetch(`${API}/coach/report`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: currentSession.id, doc_list: []})
+    });
+    const d = await r.json();
+    if (d.raw) {
+      body.innerHTML = `<div class="hint-summary">${escHtml(d.raw)}</div>`;
+      return;
+    }
+    body.innerHTML = `
+      ${d.diagnosis_flow ? `
+        <div class="report-card">
+          <h4>Diagnosis Flow</h4>
+          <p>${escHtml(d.diagnosis_flow)}</p>
+        </div>
+      ` : ''}
+      ${d.good_points?.length ? `
+        <div class="report-card">
+          <h4>Strengths</h4>
+          <ul>${d.good_points.map(p => `<li class="good">${escHtml(p)}</li>`).join('')}</ul>
+        </div>
+      ` : ''}
+      ${d.improve_points?.length ? `
+        <div class="report-card">
+          <h4>Areas for Improvement</h4>
+          <ul>${d.improve_points.map(p => `<li class="bad">${escHtml(p)}</li>`).join('')}</ul>
+        </div>
+      ` : ''}
+      ${d.recommended_approach?.length ? `
+        <div class="report-card">
+          <h4>Recommended Approach</h4>
+          <ol style="padding-left:14px">
+            ${d.recommended_approach.map(p =>
+              `<li style="font-size:11px;font-family:'IBM Plex Sans',sans-serif;
+                color:var(--text);line-height:1.6;margin-bottom:4px">${escHtml(p)}</li>`
+            ).join('')}
+          </ol>
+        </div>
+      ` : ''}
+      ${d.reference_docs?.length ? `
+        <div class="report-card">
+          <h4>Reference Docs</h4>
+          ${d.reference_docs.map(doc => `<div class="doc-item">${escHtml(doc)}</div>`).join('')}
+        </div>
+      ` : ''}
+    `;
+  } catch(e) {
+    body.innerHTML = `<div style="color:var(--red);font-size:11px">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Tabs ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['hint','report'][i] === name);
+  });
+  document.getElementById('tabHint').classList.toggle('active', name === 'hint');
+  document.getElementById('tabReport').classList.toggle('active', name === 'report');
+}
+
+// ── Toast ──
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.style.cssText = `
+    position:fixed;bottom:20px;right:20px;
+    background:var(--bg3);border:1px solid var(--border2);
+    color:var(--text);font-family:'IBM Plex Mono',monospace;
+    font-size:11px;padding:10px 16px;z-index:9999;
+    animation:fadeIn 0.2s ease;white-space:pre-wrap;max-width:320px;
+    line-height:1.5;
+  `;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// ── Init ──
+loadScenarios();
+loadSessions();
+</script>
+</body>
+</html>

@@ -2,6 +2,73 @@
 
 A self-hosted learning platform that combines intentional Kubernetes fault injection with LLM-based real-time coaching, command-level session logging, and retrieval-augmented generation (RAG) over personal documentation.
 
+
+## Quick Start (Full Stack)
+```bash
+# 1. Clone
+git clone https://github.com/zhuxi17/llm-coach.git
+cd llm-coach
+
+# 2. Python env
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 3. Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
+
+# 4. Environment
+export DB_PATH="$HOME/.llm-coach/db.sqlite"
+export SCENARIOS_DIR="$(pwd)/scenarios"
+mkdir -p ~/.llm-coach
+
+# 5. Index docs
+uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+curl -s -X POST http://localhost:8000/scenario/rag/index
+
+# 6. Install kk wrapper
+mkdir -p ~/.local/bin
+cp scripts/kk ~/.local/bin/kk && chmod +x ~/.local/bin/kk
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+
+# 7. Start snapshotter (separate terminal)
+python3 snapshotter.py &
+
+# 8. Open Web UI
+# → http://<your-server-ip>:8000
+```
+
+### Run a scenario
+```bash
+export SESSION_ID=$(curl -s -X POST http://localhost:8000/session/start \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id": "01_image_error"}' \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['session_id'])")
+
+kk get pods -n llm-coach   # logged automatically
+kk coach                    # get LLM hint
+```
+
+### (Optional) Run as a persistent service
+```bash
+sudo tee /etc/systemd/system/llm-coach.service << 'EOF'
+[Unit]
+Description=LLM Coach API
+After=network.target ollama.service
+
+[Service]
+User=$USER
+WorkingDirectory=/home/$USER/llm-coach
+Environment="DB_PATH=/home/$USER/.llm-coach/db.sqlite"
+Environment="SCENARIOS_DIR=/home/$USER/llm-coach/scenarios"
+ExecStart=/home/$USER/llm-coach/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now llm-coach
+```
+
 ## Motivation
 
 Operational proficiency in Kubernetes is typically acquired through repeated exposure to production incidents. This system formalizes that process by providing a structured, reproducible environment for fault diagnosis practice, augmented by a locally-deployed LLM coach that delivers contextual hints and post-session performance reviews.
