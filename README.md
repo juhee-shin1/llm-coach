@@ -2,78 +2,24 @@
 
 A self-hosted learning platform that combines intentional Kubernetes fault injection with LLM-based real-time coaching, command-level session logging, and retrieval-augmented generation (RAG) over personal documentation.
 
+## Web UI
 
-## Quick Start (Full Stack)
-```bash
-# 1. Clone
-git clone https://github.com/zhuxi17/llm-coach.git
-cd llm-coach
+![LLM Coach Dashboard](assets/ui-screenshot.png)
 
-# 2. Python env
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+A single-page dashboard for session management, command timeline visualization, and LLM coaching interactions. Served directly from the FastAPI backend — no separate frontend server needed.
 
-# 3. Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1:8b
-
-# 4. Environment
-export DB_PATH="$HOME/.llm-coach/db.sqlite"
-export SCENARIOS_DIR="$(pwd)/scenarios"
-mkdir -p ~/.llm-coach
-
-# 5. Index docs
-uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-curl -s -X POST http://localhost:8000/scenario/rag/index
-
-# 6. Install kk wrapper
-mkdir -p ~/.local/bin
-cp scripts/kk ~/.local/bin/kk && chmod +x ~/.local/bin/kk
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
-
-# 7. Start snapshotter (separate terminal)
-python3 snapshotter.py &
-
-# 8. Open Web UI
-# → http://<your-server-ip>:8000
-```
-
-### Run a scenario
-```bash
-export SESSION_ID=$(curl -s -X POST http://localhost:8000/session/start \
-  -H "Content-Type: application/json" \
-  -d '{"scenario_id": "01_image_error"}' \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['session_id'])")
-
-kk get pods -n llm-coach   # logged automatically
-kk coach                    # get LLM hint
-```
-
-### (Optional) Run as a persistent service
-```bash
-sudo tee /etc/systemd/system/llm-coach.service << 'EOF'
-[Unit]
-Description=LLM Coach API
-After=network.target ollama.service
-
-[Service]
-User=$USER
-WorkingDirectory=/home/$USER/llm-coach
-Environment="DB_PATH=/home/$USER/.llm-coach/db.sqlite"
-Environment="SCENARIOS_DIR=/home/$USER/llm-coach/scenarios"
-ExecStart=/home/$USER/llm-coach/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now llm-coach
-```
+| Panel | Description |
+|-------|-------------|
+| **Sessions** (left) | Browse past/active sessions, start new scenarios |
+| **Timeline** (center) | Chronological log of all `kk` commands with outputs |
+| **Coach** (right) | Real-time LLM hints and post-session review reports |
 
 ## Motivation
 
 Operational proficiency in Kubernetes is typically acquired through repeated exposure to production incidents. This system formalizes that process by providing a structured, reproducible environment for fault diagnosis practice, augmented by a locally-deployed LLM coach that delivers contextual hints and post-session performance reviews.
 
 ## System Architecture
+
 ```
 User Terminal
   └─ kk (kubectl wrapper)
@@ -86,6 +32,9 @@ User Terminal
 
 Snapshotter (background)
   └─ every 20s: kubectl get pods/events  →  snapshots table
+
+Web UI (browser)
+  └─ http://<server-ip>:8000  →  static/index.html
 ```
 
 ## Components
@@ -98,6 +47,7 @@ Snapshotter (background)
 | **RAG Backend** | Indexes local Markdown docs with `sentence-transformers` + Chroma |
 | **LLM Coach API** | FastAPI service invoking Ollama for hints and reports |
 | **kk wrapper** | Bash script intercepting kubectl calls for transparent logging |
+| **Web UI** | Vanilla HTML/CSS/JS dashboard served via FastAPI StaticFiles |
 
 ## Fault Scenarios
 
@@ -137,38 +87,76 @@ Output fields: `diagnosis_flow`, `good_points`, `improve_points`, `recommended_a
 - **Vector DB**: ChromaDB + `all-MiniLM-L6-v2` embeddings
 - **Storage**: SQLite (sessions, commands, snapshots)
 - **Orchestration**: Kubernetes (kubeadm)
+- **Frontend**: Vanilla HTML/CSS/JS (IBM Plex Mono, dark terminal aesthetic)
 
 ## Quick Start
+
 ```bash
-# 1. Install dependencies
+# 1. Clone
+git clone https://github.com/zhuxi17/llm-coach.git
+cd llm-coach
+
+# 2. Python environment
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Install and start Ollama
+# 3. Install Ollama and pull model
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull llama3.1:8b
 
-# 3. Configure environment
+# 4. Configure environment
 export DB_PATH="$HOME/.llm-coach/db.sqlite"
 export SCENARIOS_DIR="$(pwd)/scenarios"
 mkdir -p ~/.llm-coach
 
-# 4. Start API server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# 5. Start API server
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# 5. Start snapshotter (separate terminal)
+# 6. Index docs (separate terminal)
+curl -s -X POST http://localhost:8000/scenario/rag/index
+
+# 7. Start snapshotter (separate terminal)
 python3 snapshotter.py
 
-# 6. Install kk wrapper
+# 8. Install kk wrapper
+mkdir -p ~/.local/bin
 cp scripts/kk ~/.local/bin/kk && chmod +x ~/.local/bin/kk
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 
-# 7. Run a scenario
+# 9. Open Web UI → http://<your-server-ip>:8000
+```
+
+### Run a scenario
+
+```bash
 export SESSION_ID=$(curl -s -X POST http://localhost:8000/session/start \
   -H "Content-Type: application/json" \
-  -d '{"scenario_id": "01_image_error"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['session_id'])")
+  -d '{"scenario_id": "01_image_error"}' \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['session_id'])")
 
-kk get pods -n llm-coach
-kk coach
+kk get pods -n llm-coach   # logged automatically
+kk coach                    # get LLM hint
+```
+
+### Run as a persistent service (optional)
+
+```bash
+sudo tee /etc/systemd/system/llm-coach.service << EOF
+[Unit]
+Description=LLM Coach API
+After=network.target ollama.service
+
+[Service]
+User=$USER
+WorkingDirectory=$HOME/llm-coach
+Environment="DB_PATH=$HOME/.llm-coach/db.sqlite"
+Environment="SCENARIOS_DIR=$HOME/llm-coach/scenarios"
+ExecStart=$HOME/llm-coach/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now llm-coach
 ```
 
 ## API Endpoints
@@ -186,7 +174,6 @@ kk coach
 
 ## Future Work
 
-- Web UI for session timeline visualization
 - Additional fault scenarios (network policy, node taint, config map error)
 - Automated evaluation metrics (TTFR, command efficiency score)
 - Integration with personal experiment logs (O-RAN, SDN)
