@@ -93,7 +93,7 @@ Output fields: `diagnosis_flow`, `good_points`, `improve_points`, `recommended_a
 
 ```bash
 # 1. Clone
-git clone https://github.com/zhuxi17/llm-coach.git
+git clone https://github.com/juhee-shin1/llm-coach.git
 cd llm-coach
 
 # 2. Python environment
